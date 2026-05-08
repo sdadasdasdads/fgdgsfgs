@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark XO - Rooms</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --accent: #58a6ff;
+            --text: #c9d1d9;
+            --cell: #21262d;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: var(--card);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            text-align: center;
+            border: 1px solid #30363d;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            background: var(--bg);
+            color: white;
+            box-sizing: border-box;
+            text-align: center;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 90px);
+            gap: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .cell {
+            width: 90px;
+            height: 90px;
+            background: var(--cell);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            cursor: pointer;
+        }
+
+        .cell:hover { background: #30363d; }
+        .hidden { display: none; }
+        #status { margin-top: 15px; color: #8b949e; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Крестики-Нолики</h2>
+        
+        <div id="lobby">
+            <p>Введи любое число (номер комнаты):</p>
+            <input type="text" id="room-input" placeholder="Например: 777" value="777">
+            <button class="btn" id="join-btn">ВОЙТИ В КОМНАТУ</button>
+            <p id="info">Чтобы играть с другом, введите одинаковый номер.</p>
+        </div>
+
+        <div id="game-view" class="hidden">
+            <div id="status">Ожидание игрока...</div>
+            <div class="board" id="board">
+                <div class="cell" data-i="0"></div>
+                <div class="cell" data-i="1"></div>
+                <div class="cell" data-i="2"></div>
+                <div class="cell" data-i="3"></div>
+                <div class="cell" data-i="4"></div>
+                <div class="cell" data-i="5"></div>
+                <div class="cell" data-i="6"></div>
+                <div class="cell" data-i="7"></div>
+                <div class="cell" data-i="8"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peer, conn, mySymbol, currentTurn = 'X';
+        let boardState = Array(9).fill("");
+
+        const joinBtn = document.getElementById('join-btn');
+        const roomInput = document.getElementById('room-input');
+        const status = document.getElementById('status');
+
+        joinBtn.onclick = () => {
+            const room = roomInput.value;
+            if(!room) return alert("Введи номер!");
+
+            // Первый игрок в комнате будет иметь ID "room-1", второй попробует подключиться к нему
+            // Чтобы всё работало проще, мы сделаем так:
+            // Твой ID будет случайным, но мы попытаемся найти "хозяина" комнаты.
+            
+            peer = new Peer(); 
+
+            peer.on('open', (id) => {
+                const hostId = "room-xo-" + room;
+                
+                // Пробуем подключиться к хосту
+                conn = peer.connect(hostId);
+                
+                conn.on('open', () => {
+                    mySymbol = 'O';
+                    start();
+                });
+
+                // Если мы сами хост (первые в комнате)
+                const hostPeer = new Peer(hostId);
+                hostPeer.on('open', () => {
+                    status.innerText = "Ты создал комнату. Жди друга...";
+                    mySymbol = 'X';
+                });
+
+                hostPeer.on('connection', (c) => {
+                    conn = c;
+                    start();
+                });
+
+                hostPeer.on('error', () => {
+                    // Если комната уже занята, просто подключаемся как второй игрок
+                });
+            });
+        };
+
+        function start() {
+            document.getElementById('lobby').classList.add('hidden');
+            document.getElementById('game-view').classList.remove('hidden');
+            document.getElementById('board').style.display = 'grid';
+            status.innerText = "Игра началась! Твой символ: " + mySymbol;
+
+            conn.on('data', data => {
+                if(data.type === 'move') applyMove(data.index, data.symbol);
+            });
+        }
+
+        document.querySelectorAll('.cell').forEach(cell => {
+            cell.onclick = () => {
+                const i = cell.dataset.i;
+                if (boardState[i] === "" && currentTurn === mySymbol && conn) {
+                    applyMove(i, mySymbol);
+                    conn.send({ type: 'move', index: i, symbol: mySymbol });
+                }
+            };
+        });
+
+        function applyMove(i, symbol) {
+            boardState[i] = symbol;
+            const cell = document.querySelector(`[data-i="${i}"]`);
+            cell.innerText = symbol;
+            cell.style.color = symbol === 'X' ? '#ff7b72' : '#58a6ff';
+            
+            currentTurn = symbol === 'X' ? 'O' : 'X';
+            status.innerText = "Ход: " + currentTurn;
+            
+            checkWinner();
+        }
+
+        function checkWinner() {
+            const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+            for (let w of wins) {
+                if (boardState[w[0]] && boardState[w[0]] === boardState[w[1]] && boardState[w[0]] === boardState[w[2]]) {
+                    status.innerText = "Победил " + boardState[w[0]] + "!";
+                    currentTurn = "OVER";
+                }
+            }
+        }
+    </script>
+</body>
+</html>
